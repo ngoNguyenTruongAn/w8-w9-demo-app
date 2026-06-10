@@ -1,0 +1,21 @@
+services:
+  backend:
+    build:
+      context: ./app/backend
+    container_name: w8-w9-backend
+    ports:
+      - "5000:5000"
+    environment:
+      APP_VERSION: local-compose
+
+  frontend:
+    build:
+      context: ./app
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_URL: http://localhost:5000
+    container_name: w8-w9-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
