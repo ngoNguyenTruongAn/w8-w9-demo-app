@@ -7,7 +7,6 @@ on:
 
 env:
   IMAGE_NAME: w8-w9-demo-app
-  GITOPS_REPO: ngoNguyenTruongAn/w8-w9-gitops-repo
   GITOPS_PATH: k8s/demo-app/deployment.yaml
 
 jobs:
@@ -40,7 +39,8 @@ jobs:
       - name: Checkout GitOps repo
         uses: actions/checkout@v4
         with:
-          repository: ${{ env.GITOPS_REPO }}
+          repository: ngoNguyenTruongAn/w8-w9-gitops-repo
+          ref: main
           token: ${{ secrets.GITOPS_REPO_PAT }}
           path: gitops
 
