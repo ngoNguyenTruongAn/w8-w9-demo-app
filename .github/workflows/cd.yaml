@@ -1,0 +1,52 @@
+name: CD Update GitOps Repo
+
+on:
+  workflow_run:
+    workflows:
+      - CI Build and Push Images
+    types:
+      - completed
+    branches:
+      - main
+
+env:
+  GITOPS_PATH: k8s/demo-app/deployment.yaml
+  BACKEND_IMAGE: w8-w9-demo-backend
+  FRONTEND_IMAGE: w8-w9-demo-frontend
+
+jobs:
+  update-gitops:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    environment:
+      name: production
+
+    steps:
+      - name: Set image tag from CI commit
+        run: |
+          IMAGE_TAG=$(echo "${{ github.event.workflow_run.head_sha }}" | cut -c1-7)
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+
+      - name: Checkout GitOps repo
+        uses: actions/checkout@v4
+        with:
+          repository: ngoNguyenTruongAn/w8-w9-gitops-repo
+          ref: main
+          token: ${{ secrets.GITOPS_REPO_PAT }}
+          path: gitops
+
+      - name: Update image tags in GitOps repo
+        run: |
+          cd gitops
+
+          sed -i "s|image: .*w8-w9-demo-backend:.*|image: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.BACKEND_IMAGE }}:${{ env.IMAGE_TAG }}|g" ${{ env.GITOPS_PATH }}
+
+          sed -i "s|image: .*w8-w9-demo-frontend:.*|image: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.FRONTEND_IMAGE }}:${{ env.IMAGE_TAG }}|g" ${{ env.GITOPS_PATH }}
+
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          git add ${{ env.GITOPS_PATH }}
+          git commit -m "chore: update FE/BE image tags to ${{ env.IMAGE_TAG }}" || echo "No changes to commit"
+          git push
