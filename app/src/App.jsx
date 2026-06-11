@@ -32,7 +32,7 @@ function App() {
     <main style={styles.page}>
       <section style={styles.card}>
         <p style={styles.badge}>W8-W9 DevOps Lab</p>
-        <h1 style={styles.title}>GitOps CI/CD Demo App</h1>
+        <h1 style={styles.title}>GitOps CI/CD Demo Ap -E2E Test</h1>
 
         {error && <p style={styles.error}>{error}</p>}
 
