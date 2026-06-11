@@ -7,6 +7,7 @@ on:
 
 jobs:
   plan:
+    if: ${{ hashFiles('**/*.tf', '**/*.tf.json') != '' }}
     runs-on: ubuntu-latest
 
     defaults:
