@@ -37,6 +37,7 @@ jobs:
           path: gitops
 
       - name: Update image tags in GitOps repo
+        if: false
         run: |
           cd gitops
 
