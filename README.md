@@ -242,32 +242,310 @@ Ví dụ:
 
 ---
 
-# 8. CI Build and Push Images
+# 8. CI Evidence — Build, Plan, Validate and Branch Protection
+
+## Mục tiêu
+
+Thiết lập CI để kiểm tra và tự động hóa các bước quan trọng trước khi thay đổi được đưa vào hệ thống GitOps.
+
+CI trong bài lab gồm 3 phần:
+
+| CI Workflow                   | Mục đích                                                   |
+| ----------------------------- | ---------------------------------------------------------- |
+| CI Build and Push Images      | Build Docker image backend/frontend và push lên Docker Hub |
+| Terraform Plan                | Kiểm tra Terraform code khi có Pull Request                |
+| Validate Kubernetes Manifests | Validate Kubernetes manifest trước khi merge vào `main`    |
+
+Ngoài ra, branch `main` được bảo vệ bằng Branch Protection để hạn chế merge code lỗi.
+
+---
+
+## 1. CI Build and Push Docker Images
 
 ### Mục tiêu
 
 Tự động build Docker image cho backend và frontend sau khi có thay đổi trên branch `main`.
 
+Workflow này giúp đảm bảo mỗi lần code app thay đổi, image mới sẽ được build và push lên Docker Hub với tag theo commit SHA.
+
 ### Workflow file
 
-`.github/workflows/ci.yml`
+```text
+.github/workflows/ci.yml (ở repo app)
+```
 
-### Nội dung chính
+Ví dụ workflow đang có:
 
-Workflow thực hiện các bước:
+```yaml
+name: CI Build and Push Images
 
-- Checkout source code.
-- Tạo image tag từ Git commit SHA.
-- Login Docker Hub bằng GitHub Secrets.
-- Build backend Docker image.
-- Push backend image lên Docker Hub.
-- Build frontend Docker image.
-- Push frontend image lên Docker Hub.
+on:
+  push:
+    branches:
+      - main
+
+env:
+  BACKEND_IMAGE: w8-w9-demo-backend
+  FRONTEND_IMAGE: w8-w9-demo-frontend
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout app repo
+        uses: actions/checkout@v4
+
+      - name: Set image tag
+        run: |
+          IMAGE_TAG=${GITHUB_SHA::7}
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push backend image
+        run: |
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.BACKEND_IMAGE }}:${{ env.IMAGE_TAG }} ./app/backend
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.BACKEND_IMAGE }}:${{ env.IMAGE_TAG }}
+
+      - name: Build and push frontend image
+        run: |
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.FRONTEND_IMAGE }}:${{ env.IMAGE_TAG }} ./app/frontend
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.FRONTEND_IMAGE }}:${{ env.IMAGE_TAG }}
+```
+
+### Ý nghĩa
+
+Workflow này giúp tự động hóa quá trình build image:
+
+```text
+Push code lên main
+→ GitHub Actions chạy
+→ Build backend image
+→ Build frontend image
+→ Push image lên Docker Hub
+→ Manifest GitOps có thể dùng image tag mới
+```
 
 ### Evidence
 
 ![CI Build Push](./Evidence/CI%20Build%20Push.jpg)
+
 ---
+
+## 2. CI Terraform Plan on Pull Request
+
+### Mục tiêu
+
+Tự động kiểm tra Terraform code khi có Pull Request vào branch `main`.
+
+Workflow này giúp phát hiện lỗi Terraform trước khi merge code.
+
+### Workflow file
+
+```text
+.github/workflows/terraform-plan.yaml
+```
+
+### Workflow
+
+```yaml
+name: Terraform Plan
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: terraform
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        run: terraform init
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        run: terraform plan
+```
+
+### Ý nghĩa
+
+Workflow này kiểm tra Infrastructure as Code trước khi merge:
+
+```text
+Pull Request vào main
+→ terraform init
+→ terraform validate
+→ terraform plan
+```
+
+Nếu Terraform code lỗi cú pháp hoặc plan không chạy được, Pull Request sẽ fail và không nên merge.
+
+
+---
+
+## 3. CI Validate Kubernetes Manifests
+
+### Mục tiêu
+
+Validate Kubernetes manifest trước khi merge vào branch `main`.
+
+Workflow này bảo vệ GitOps flow, vì ArgoCD sẽ sync manifest từ `main`. Nếu manifest lỗi được merge vào `main`, ArgoCD có thể sync fail hoặc làm app bị lỗi.
+
+### Workflow file
+
+```text
+.github/workflows/validate.yml
+```
+
+### Workflow đề xuất
+
+```yaml
+name: validate
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "k8s/**"
+      - "argocd/**"
+      - ".github/workflows/validate.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Validate Kubernetes manifests
+        run: |
+          kubectl kustomize k8s/demo-app
+```
+
+### Ý nghĩa
+
+Workflow này kiểm tra manifest Kubernetes trước khi merge:
+
+```text
+Pull Request vào main
+→ GitHub Actions chạy validate
+→ kubectl kustomize k8s/demo-app
+→ Nếu manifest lỗi YAML/kustomize thì CI fail
+→ Không merge code lỗi vào main
+```
+
+### Evidence
+
+![CI Validate](./Evidence/CI%20Validate.jpg)
+
+---
+
+## 4. Branch Protection
+
+### Mục tiêu
+
+Bảo vệ branch `main` để code không được merge trực tiếp nếu chưa qua Pull Request và CI check.
+
+### Cấu hình trên GitHub
+
+Vào:
+
+```text
+GitHub Repo → Settings → Branches → Add branch protection rule
+```
+
+Cấu hình:
+
+```text
+Branch name pattern: main
+```
+
+Bật các option:
+
+```text
+Require a pull request before merging
+Require status checks to pass before merging
+```
+
+Required status check:
+
+```text
+validate
+```
+
+Có thể bật thêm:
+
+```text
+Require approvals
+```
+
+### Ý nghĩa
+
+Branch Protection giúp bảo vệ GitOps source of truth.
+
+Nếu PR có manifest lỗi:
+
+```text
+validate failed
+→ Merge button bị khóa
+→ Không thể đưa manifest lỗi vào main
+→ ArgoCD không sync manifest lỗi vào cluster
+```
+
+### Evidence
+
+![Branch Protection](./Evidence/Branch%20Protection.jpg)
+
+---
+
+## 5. CI Evidence Summary
+
+| Evidence                     | File ảnh                               |
+| ---------------------------- | -------------------------------------- |
+| CI Build and Push Images     | `./Evidence/CI%20Build%20Push.jpg`     |
+| Terraform Plan on PR         | `./Evidence/Terraform%20Plan%20CI.jpg` |
+| Kubernetes Manifest Validate | `./Evidence/CI%20Validate.jpg`         |
+| Branch Protection            | `./Evidence/Branch%20Protection.jpg`   |
+
+---
+
+## 6. Kết luận
+
+CI giúp bảo vệ toàn bộ GitOps workflow:
+
+```text
+Developer tạo Pull Request
+→ CI validate code/manifest/IaC
+→ Branch Protection chặn merge nếu CI fail
+→ Chỉ manifest hợp lệ được merge vào main
+→ ArgoCD sync từ main vào cluster
+```
+
+Nhờ đó, hệ thống giảm rủi ro sync lỗi manifest hoặc triển khai cấu hình sai vào Kubernetes cluster.
 
 # PHẦN B — Monitoring, Application & Metrics
 
